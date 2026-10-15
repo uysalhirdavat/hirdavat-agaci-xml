@@ -1,0 +1,29 @@
+
+name: Hirdavat Agaci XML
+
+on:
+  workflow_dispatch:
+
+jobs:
+  xml-olustur:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Kodlari indir
+        uses: actions/checkout@v4
+
+      - name: Python kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: XML olustur
+        run: python build.py
+
+      - name: XML dosyasini sakla
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hirdavat-agaci-xml
+          path: urunler.xml
+          if-no-files-found: error
