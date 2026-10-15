@@ -7,6 +7,7 @@ on:
 jobs:
   urun-testi:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Kodlari indir
@@ -27,6 +28,8 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: urun-baglantilari
-          path: urun_baglantilari.csv
+          name: hirdavat-agaci-urun-raporu
+          path: |
+            urun_baglantilari.csv
+            kategori_raporu.csv
           if-no-files-found: error
