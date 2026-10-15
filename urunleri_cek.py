@@ -2,7 +2,7 @@
 import csv
 import time
 from collections import deque
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse, parse_qs
 from urllib.robotparser import RobotFileParser
 
 import requests
@@ -13,7 +13,7 @@ BASLANGIC = SITE + "/kategoriler"
 CIKTI = "urun_baglantilari.csv"
 
 BEKLEME = 3
-MAKSIMUM_SAYFA = 100
+MAKSIMUM_SAYFA = 500
 USER_AGENT = "UysalHirdavatXML/1.0"
 
 oturum = requests.Session()
@@ -24,74 +24,106 @@ robots.set_url(SITE + "/robots.txt")
 
 try:
     robots.read()
-except Exception:
-    raise SystemExit("robots.txt kontrol edilemedi.")
+except Exception as hata:
+    raise SystemExit(f"robots.txt okunamadi: {hata}")
+
+def temizle(adres):
+    parca = urlparse(adres)
+
+    if (
+        parca.scheme != "https"
+        or parca.netloc != "www.hirdavatagaci.com"
+    ):
+        return None
+
+    yol = parca.path.rstrip("/") or "/"
+
+    if yol.startswith("/kategori/"):
+        sayfa = parse_qs(parca.query).get("tp", ["1"])[0]
+
+        if not sayfa.isdigit():
+            return None
+
+        sorgu = f"tp={int(sayfa)}" if int(sayfa) > 1 else ""
+
+    else:
+        sorgu = ""
+
+    return urlunparse((
+        "https",
+        "www.hirdavatagaci.com",
+        yol,
+        "",
+        sorgu,
+        ""
+    ))
 
 def sayfa_al(adres):
     if not robots.can_fetch(USER_AGENT, adres):
-        print("Erisime izin verilmiyor:", adres)
-        return None
+        raise RuntimeError(f"Erisim izni yok: {adres}")
 
     time.sleep(BEKLEME)
 
-    try:
-        cevap = oturum.get(adres, timeout=20)
-        cevap.raise_for_status()
-        return BeautifulSoup(cevap.text, "html.parser")
-    except requests.RequestException as hata:
-        print("Sayfa hatasi:", adres, hata)
-        return None
+    cevap = oturum.get(adres, timeout=30)
+    cevap.raise_for_status()
 
-def uygun_baglanti(adres):
-    parca = urlparse(adres)
-    return (
-        parca.scheme == "https"
-        and parca.netloc == "www.hirdavatagaci.com"
-    )
+    return BeautifulSoup(cevap.text, "html.parser")
 
 def calistir():
     kuyruk = deque([BASLANGIC])
+    planlanan = {BASLANGIC}
     ziyaret = set()
     urunler = set()
-    hata_sayisi = 0
 
-    while kuyruk and len(ziyaret) < MAKSIMUM_SAYFA:
+    while kuyruk:
+        if len(ziyaret) >= MAKSIMUM_SAYFA:
+            raise SystemExit(
+                f"Sayfa sinirina ulasildi: {MAKSIMUM_SAYFA}. "
+                "Tarama eksik, CSV yayinlanmadi."
+            )
+
         adres = kuyruk.popleft()
 
         if adres in ziyaret:
             continue
 
+        print("Kontrol:", adres, flush=True)
+
+        try:
+            html = sayfa_al(adres)
+        except Exception as hata:
+            raise SystemExit(
+                f"Tarama durduruldu: {adres} - {hata}"
+            )
+
         ziyaret.add(adres)
-        print("Kontrol:", adres)
-
-        html = sayfa_al(adres)
-
-        if html is None:
-            hata_sayisi += 1
-            continue
 
         for etiket in html.select("a[href]"):
-            baglanti = urljoin(adres, etiket["href"])
-            parca = urlparse(baglanti)
+            baglanti = temizle(
+                urljoin(adres, etiket["href"])
+            )
 
-            if not uygun_baglanti(baglanti):
+            if not baglanti:
                 continue
 
-            temiz = baglanti.split("#")[0]
+            yol = urlparse(baglanti).path
 
-            if parca.path.startswith("/urun/"):
-                urunler.add(temiz)
+            if yol.startswith("/urun/"):
+                urunler.add(baglanti)
 
             elif (
-                parca.path.startswith("/kategori/")
-                or parca.path == "/kategoriler"
+                yol.startswith("/kategori/")
+                or yol == "/kategoriler"
             ):
-                if temiz not in ziyaret:
-                    kuyruk.append(temiz)
+                if baglanti not in planlanan:
+                    planlanan.add(baglanti)
+                    kuyruk.append(baglanti)
 
-    if hata_sayisi or kuyruk:
-        raise SystemExit(
-            "Tarama eksik. Sonuclar yayinlanmadi."
+        print(
+            "Sayfa:", len(ziyaret),
+            "Bekleyen:", len(kuyruk),
+            "Urun:", len(urunler),
+            flush=True
         )
 
     if not urunler:
@@ -104,7 +136,9 @@ def calistir():
         for adres in sorted(urunler):
             yazici.writerow([adres])
 
-    print("Bulunan urun:", len(urunler))
+    print("Tarama tamamlandi.")
+    print("Toplam sayfa:", len(ziyaret))
+    print("Toplam urun:", len(urunler))
     print("Dosya:", CIKTI)
 
 if __name__ == "__main__":
