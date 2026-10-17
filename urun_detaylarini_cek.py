@@ -149,9 +149,14 @@ def urun_oku(adres):
         duz_metin(veri.get("brand"))
         or metin_bul(html, [
             '[itemprop="brand"]',
-            ".product-brand"
+            ".product-brand",
+            '[data-brand]',
+            'meta[property="product:brand"]'
         ])
     )
+    # Urun adindan yalnizca kesin taninan marka on ekini kullan.
+    if not marka and re.match(r"^AEG(?:\\s|$)", ad, re.I):
+        marka = "AEG"
 
     teklifler = veri.get("offers", {})
     if isinstance(teklifler, list):
@@ -186,15 +191,46 @@ def urun_oku(adres):
         )
 
     kategori = ""
-    for eleman in html.select(
-        '.breadcrumb a, .breadcrumbs a, '
-        '[aria-label="breadcrumb"] a'
-    ):
-        yazi = eleman.get_text(" ", strip=True)
-        if yazi and yazi.lower() not in (
-            "anasayfa", "ana sayfa", "home"
+    # Schema.org breadcrumb yolundan kategori oku.
+    for script in html.select('script[type="application/ld+json"]'):
+        try:
+            kok = json.loads(script.string or script.get_text())
+        except (ValueError, TypeError):
+            continue
+        kuyruk = kok if isinstance(kok, list) else [kok]
+        while kuyruk:
+            oge = kuyruk.pop(0)
+            if not isinstance(oge, dict):
+                continue
+            tip = oge.get("@type", "")
+            tipler = tip if isinstance(tip, list) else [tip]
+            if "BreadcrumbList" in tipler:
+                elemanlar = oge.get("itemListElement", [])
+                if isinstance(elemanlar, list):
+                    adlar = []
+                    for eleman in elemanlar:
+                        if not isinstance(eleman, dict):
+                            continue
+                        yazi = duz_metin(eleman.get("name") or eleman.get("item"))
+                        if yazi and yazi.lower() not in ("anasayfa", "ana sayfa", "home", ad.lower()):
+                            adlar.append(yazi)
+                    if adlar:
+                        kategori = adlar[-1]
+            grafik = oge.get("@graph", [])
+            if isinstance(grafik, list):
+                kuyruk.extend(grafik)
+    if not kategori:
+        for eleman in html.select(
+            '.breadcrumb a[href*="/kategori/"], '
+            '.breadcrumbs a[href*="/kategori/"], '
+            '[aria-label="breadcrumb"] a[href*="/kategori/"], '
+            '.breadcrumb-item a[href*="/kategori/"]'
         ):
-            kategori = temiz_metin(yazi)
+            yazi = eleman.get_text(" ", strip=True)
+            if yazi:
+                kategori = temiz_metin(yazi)
+    if not kategori:
+        print(f"UYARI: Kategori bulunamadi: {adres}", flush=True)
 
     aciklama = (
         duz_metin(veri.get("description"))
