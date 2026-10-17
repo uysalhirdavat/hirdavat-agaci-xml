@@ -100,32 +100,29 @@ def jsonld_urun(html):
 
 
 def sayfa_urun_bilgisi(html):
-    # Sayfa JS kodunda yalnizca ana urunun pageParams.product alanini oku.
-    # Ic ice nesneler olabilecegi icin ilk kapatma parantezinde kesme.
+    # JS kaynaginda ana urun kaydini bul; sepet/oneri urunlerini kullanma.
     for script in html.select("script"):
         kaynak = script.string or script.get_text()
-        baslangic = re.search(r"\\bpageParams\\s*=\\s*\\{", kaynak)
+        baslangic = re.search(r"\bpageParams\s*=\s*\{", kaynak)
         if not baslangic:
             continue
         kalan = kaynak[baslangic.end():]
-        urun = re.search(r"\\bproduct\\s*:\\s*\\{", kalan)
+        urun = re.search(r"\bproduct\s*:\s*\{", kalan)
         if not urun:
             continue
         bas = urun.end()
-        derinlik = 1
-        son = bas
-        tirnak = None
-        kacis = False
+        derinlik, son = 1, None
+        tirnak, kacis = None, False
         for i in range(bas, len(kalan)):
             ch = kalan[i]
             if tirnak:
                 if kacis:
                     kacis = False
-                elif ch == "\\\\":
+                elif ch == "\\":
                     kacis = True
                 elif ch == tirnak:
                     tirnak = None
-            elif ch in ("'", '"', "`"):
+            elif ch in ("'", '"', "\x60"):
                 tirnak = ch
             elif ch == "{":
                 derinlik += 1
@@ -134,9 +131,11 @@ def sayfa_urun_bilgisi(html):
                 if derinlik == 0:
                     son = i
                     break
+        if son is None:
+            continue
         alan = kalan[bas:son]
         def deger(anahtar):
-            desen = r'(?<![\\w])["\\\']?' + re.escape(anahtar) + r'["\\\']?\\s*:\\s*(?:"([^"]*)"|\\\'([^\\\']*)\\\'|(-?\\d+(?:\\.\\d+)?))'
+            desen = r"""(?<!\w)["']?""" + re.escape(anahtar) + r"""["']?\s*:\s*(?:"([^"]*)"|'([^']*)'|(-?\d+(?:\.\d+)?))"""
             bulunan = re.search(desen, alan)
             return next((x for x in bulunan.groups() if x is not None), "") if bulunan else ""
         sonuc = {x: deger(x) for x in ("sku", "brandName", "categoryName", "tax")}
@@ -305,6 +304,8 @@ def urun_oku(adres):
 
     # Yalnizca ana urunun pageParams.product.tax degeri kullanilir.
     kdv = sayfa.get("tax", "")
+    if not kdv:
+        print(f"KDV TANILAMA: pageParams product bulundu={bool(sayfa)}, alanlar={list(sayfa.keys()) if sayfa else []}", flush=True)
     if kdv and kdv not in ("0", "1", "10", "20"):
         print(f"UYARI: Beklenmeyen KDV: {kdv} - {adres}", flush=True)
         kdv = ""
