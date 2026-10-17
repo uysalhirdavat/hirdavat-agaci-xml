@@ -12,9 +12,9 @@ from bs4 import BeautifulSoup
 
 SITE = "https://www.hirdavatagaci.com"
 GIRIS = Path("urun_baglantilari.csv")
-CIKIS = Path("urun_detay_test.csv")
+CIKIS = Path("urun_detay_50_test.csv")
 
-TEST_ADEDI = 10
+TEST_ADEDI = 50
 BEKLEME = 3
 USER_AGENT = "UysalHirdavatXML/1.0"
 
@@ -352,10 +352,22 @@ def calistir():
     if len(adresler) < TEST_ADEDI:
         raise SystemExit("Yeterli urun baglantisi yok.")
 
+    # Alfabetik ilk 50 yerine farkli marka URL on eklerine yayil.
+    gruplar = {}
+    for adres in adresler:
+        slug = urlparse(adres).path.removeprefix("/urun/")
+        onek = slug.split("-", 1)[0].lower()
+        gruplar.setdefault(onek, []).append(adres)
+    secilen = []
+    while len(secilen) < TEST_ADEDI and any(gruplar.values()):
+        for onek in sorted(gruplar):
+            if gruplar[onek] and len(secilen) < TEST_ADEDI:
+                secilen.append(gruplar[onek].pop(0))
+    print("Secilen URL onek sayisi:", len({urlparse(x).path.removeprefix("/urun/").split("-", 1)[0] for x in secilen}), flush=True)
     sonuclar = []
 
     for sira, adres in enumerate(
-        adresler[:TEST_ADEDI], 1
+        secilen, 1
     ):
         print(
             f"Urun {sira}/{TEST_ADEDI}: {adres}",
@@ -401,6 +413,8 @@ def calistir():
     print("\nTEST TAMAMLANDI", flush=True)
     print("Okunan urun:", len(sonuclar), flush=True)
     print("Dosya:", CIKIS, flush=True)
+    print("Markalar:", sorted({x["marka"] for x in sonuclar if x["marka"]}), flush=True)
+    print("Eksik marka:", sum(not x["marka"] for x in sonuclar), "| Eksik kategori:", sum(not x["kategori"] for x in sonuclar), "| Eksik barkod:", sum(not x["barkod"] for x in sonuclar), flush=True)
     print("KDV bulunan:", sum(bool(x["kdv"]) for x in sonuclar), "/", len(sonuclar), flush=True)
 
 
