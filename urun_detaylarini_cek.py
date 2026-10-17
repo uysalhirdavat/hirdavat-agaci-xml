@@ -150,6 +150,7 @@ def urun_oku(adres):
         or metin_bul(html, [
             '[itemprop="brand"]',
             ".product-brand",
+            ".product-list-row.product-brands .product-list-content",
             '[data-brand]',
             'meta[property="product:brand"]'
         ])
@@ -229,6 +230,11 @@ def urun_oku(adres):
             yazi = eleman.get_text(" ", strip=True)
             if yazi:
                 kategori = temiz_metin(yazi)
+    if not kategori:
+        kategori = metin_bul(html, [
+            '.product-list-row .product-list-content a[href*="/kategori/"]',
+            'ol[typeof="BreadcrumbList"] a[href*="/kategori/"]'
+        ])
     if not kategori:
         print(f"UYARI: Kategori bulunamadi: {adres}", flush=True)
 
