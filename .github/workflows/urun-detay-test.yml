@@ -1,5 +1,5 @@
 
-name: Urun Detay Testi
+name: Urun Detay Testi (50 Urun)
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
 jobs:
   urun-detay-testi:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Kodlari indir
@@ -24,13 +24,13 @@ jobs:
       - name: Urun baglantilarini olustur
         run: python urunleri_cek.py
 
-      - name: Ilk 10 urunun detaylarini cek
+      - name: Farkli markalardan 50 urunun detaylarini cek
         run: python urun_detaylarini_cek.py
 
       - name: Test raporunu kaydet
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: hirdavat-agaci-10-urun-test
-          path: urun_detay_test.csv
+          name: hirdavat-agaci-50-urun-test
+          path: urun_detay_50_test.csv
           if-no-files-found: error
