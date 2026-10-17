@@ -86,32 +86,67 @@ def metin_bul(html, seciciler):
     return ""
 
 
+def sayfa_metinleri(html):
+    return [
+        temiz_metin(x)
+        for x in html.stripped_strings
+        if temiz_metin(x)
+    ]
+
+
+def etiket_sonrasi(html, etiket):
+    """
+    Sayfada ilk kez tam olarak eslesen etiketi bulur
+    ve hemen sonraki metni alir.
+
+    Ornek:
+    Marka
+    AEG
+
+    veya:
+    Barkod Kodu
+    4058546289652
+    """
+
+    metinler = sayfa_metinleri(html)
+    hedef = temiz_metin(etiket).lower()
+
+    for i, metin in enumerate(metinler):
+        if metin.lower() == hedef:
+            if i + 1 < len(metinler):
+                return metinler[i + 1]
+
+    return ""
+
+
 def jsonld_verileri(html):
-    sonuc = []
+    sonuclar = []
 
     for script in html.select(
         'script[type="application/ld+json"]'
     ):
-        icerik = script.string or script.get_text()
-
         try:
-            veri = json.loads(icerik)
+            veri = json.loads(
+                script.string
+                or script.get_text()
+            )
+
+            sonuclar.append(veri)
+
         except (ValueError, TypeError):
             continue
 
-        sonuc.append(veri)
-
-    return sonuc
+    return sonuclar
 
 
 def jsonld_urun(html):
     def tara(nesne):
         if isinstance(nesne, list):
             for oge in nesne:
-                bulunan = tara(oge)
+                sonuc = tara(oge)
 
-                if bulunan:
-                    return bulunan
+                if sonuc:
+                    return sonuc
 
         elif isinstance(nesne, dict):
             tip = nesne.get("@type", [])
@@ -122,43 +157,6 @@ def jsonld_urun(html):
             )
 
             if "Product" in tipler:
-                return nesne
-
-            for deger in nesne.values():
-                bulunan = tara(deger)
-
-                if bulunan:
-                    return bulunan
-
-        return {}
-
-    for veri in jsonld_verileri(html):
-        bulunan = tara(veri)
-
-        if bulunan:
-            return bulunan
-
-    return {}
-
-
-def jsonld_breadcrumb(html):
-    def tara(nesne):
-        if isinstance(nesne, list):
-            for oge in nesne:
-                sonuc = tara(oge)
-
-                if sonuc:
-                    return sonuc
-
-        elif isinstance(nesne, dict):
-            tip = nesne.get("@type", "")
-            tipler = (
-                tip
-                if isinstance(tip, list)
-                else [tip]
-            )
-
-            if "BreadcrumbList" in tipler:
                 return nesne
 
             for deger in nesne.values():
@@ -178,124 +176,6 @@ def jsonld_breadcrumb(html):
     return {}
 
 
-def etiket_degeri_bul(html, etiketler):
-    """
-    Marka, Barkod Kodu, Stok Kodu gibi
-    ekranda etiket/deger seklinde bulunan
-    bilgileri okumaya calisir.
-    """
-
-    etiketler = [
-        temiz_metin(x)
-        for x in etiketler
-    ]
-
-    seciciler = [
-        "tr",
-        "li",
-        "dl",
-        ".product-property",
-        ".product-properties li",
-        ".product-feature",
-        ".product-features li",
-        ".product-info-row",
-        ".specification",
-        ".specification-row",
-        ".detail-row",
-        ".product-detail-row"
-    ]
-
-    for secici in seciciler:
-        for satir in html.select(secici):
-            metin = temiz_metin(
-                satir.get_text(" ", strip=True)
-            )
-
-            if not metin:
-                continue
-
-            for etiket in etiketler:
-                desen = (
-                    r"^"
-                    + re.escape(etiket)
-                    + r"\s*:?\s*(.+)$"
-                )
-
-                eslesme = re.match(
-                    desen,
-                    metin,
-                    flags=re.IGNORECASE
-                )
-
-                if eslesme:
-                    deger = temiz_metin(
-                        eslesme.group(1)
-                    )
-
-                    if (
-                        deger
-                        and deger.lower()
-                        != etiket.lower()
-                    ):
-                        return deger
-
-    # Etiket tek basina bir elementteyse
-    for etiket in etiketler:
-        desen = re.compile(
-            r"^\s*"
-            + re.escape(etiket)
-            + r"\s*:?\s*$",
-            re.IGNORECASE
-        )
-
-        for metin_dugumu in html.find_all(
-            string=desen
-        ):
-            parent = metin_dugumu.parent
-
-            if not parent:
-                continue
-
-            # Sonraki kardes element
-            kardes = parent.find_next_sibling()
-
-            if kardes:
-                deger = temiz_metin(
-                    kardes.get_text(
-                        " ",
-                        strip=True
-                    )
-                )
-
-                if deger:
-                    return deger
-
-            # Ayni satirdaki diger hucre
-            satir = parent.find_parent("tr")
-
-            if satir:
-                hucreler = satir.find_all(
-                    ["td", "th"]
-                )
-
-                if len(hucreler) >= 2:
-                    deger = temiz_metin(
-                        hucreler[-1].get_text(
-                            " ",
-                            strip=True
-                        )
-                    )
-
-                    if (
-                        deger
-                        and deger.lower()
-                        != etiket.lower()
-                    ):
-                        return deger
-
-    return ""
-
-
 def teklif_bul(veri):
     teklifler = veri.get("offers", {})
 
@@ -312,279 +192,332 @@ def teklif_bul(veri):
     return teklifler
 
 
-def marka_bul(html, veri, urun_adi):
+def marka_duzelt(marka):
+    marka = temiz_metin(marka)
+
+    if not marka:
+        return ""
+
+    normal = marka.upper()
+
+    eslesmeler = {
+        "AEG POWERTOOLS": "AEG",
+        "AEG POWER TOOLS": "AEG",
+        "AEG POWERTOOL": "AEG"
+    }
+
+    if normal in eslesmeler:
+        return eslesmeler[normal]
+
+    return marka
+
+
+def marka_bul(html, veri):
+    # ONCELIK:
+    # Sitede urun bilgisinin yaninda gorunen Marka alani.
+    marka = etiket_sonrasi(
+        html,
+        "Marka"
+    )
+
+    if marka:
+        # Yanlislikla urun adi geldiyse kullanma.
+        urun_adi = (
+            duz_metin(veri.get("name"))
+            or metin_bul(html, ["h1"])
+        )
+
+        if (
+            urun_adi
+            and marka.lower()
+            == urun_adi.lower()
+        ):
+            marka = ""
+        else:
+            return (
+                marka_duzelt(marka),
+                "GORUNEN_MARKA"
+            )
+
     marka = duz_metin(
         veri.get("brand")
     )
 
     if marka:
-        return marka, "JSON-LD"
-
-    marka = etiket_degeri_bul(
-        html,
-        [
-            "Marka",
-            "Brand"
-        ]
-    )
-
-    if marka:
-        return marka, "URUN DETAYI"
+        return (
+            marka_duzelt(marka),
+            "JSON-LD"
+        )
 
     marka = metin_bul(
         html,
         [
             '[itemprop="brand"]',
             ".product-brand",
-            ".brand-name",
-            '[class*="brand-name"]'
+            ".brand-name"
         ]
     )
 
     if marka:
-        return marka, "HTML"
+        return (
+            marka_duzelt(marka),
+            "HTML"
+        )
 
-    # Urun adindan marka tahmin ETMIYORUZ.
+    return "", "BULUNAMADI"
+
+
+def kategori_bul(html):
+    # Sitede urun bilgisindeki Kategori alani.
+    kategori = etiket_sonrasi(
+        html,
+        "Kategori"
+    )
+
+    if kategori:
+        return kategori, "GORUNEN_KATEGORI"
+
+    # Breadcrumb yedegi
+    adaylar = []
+
+    for link in html.select(
+        ".breadcrumb a, "
+        ".breadcrumbs a, "
+        '[class*="breadcrumb"] a'
+    ):
+        isim = temiz_metin(
+            link.get_text(
+                " ",
+                strip=True
+            )
+        )
+
+        href = link.get(
+            "href",
+            ""
+        )
+
+        if (
+            isim
+            and "/kategori/" in href
+        ):
+            adaylar.append(isim)
+
+    if adaylar:
+        return (
+            adaylar[-1],
+            "BREADCRUMB"
+        )
+
     return "", "BULUNAMADI"
 
 
 def stok_kodu_bul(html, veri):
+    # Sitedeki gorunen degeri tercih ediyoruz.
+    stok_kodu = etiket_sonrasi(
+        html,
+        "Stok Kodu"
+    )
+
+    if stok_kodu:
+        return (
+            stok_kodu,
+            "GORUNEN_STOK_KODU"
+        )
+
     stok_kodu = duz_metin(
         veri.get("sku")
     )
 
     if stok_kodu:
-        return stok_kodu, "JSON-LD"
-
-    stok_kodu = etiket_degeri_bul(
-        html,
-        [
-            "Stok Kodu",
-            "Ürün Kodu",
-            "Urun Kodu",
-            "SKU"
-        ]
-    )
-
-    if stok_kodu:
-        return stok_kodu, "URUN DETAYI"
-
-    stok_kodu = metin_bul(
-        html,
-        [
-            '[itemprop="sku"]',
-            ".product-code"
-        ]
-    )
-
-    if stok_kodu:
-        return stok_kodu, "HTML"
+        return (
+            stok_kodu,
+            "JSON-LD"
+        )
 
     return "", "BULUNAMADI"
 
 
 def barkod_bul(html, veri):
+    barkod = etiket_sonrasi(
+        html,
+        "Barkod Kodu"
+    )
+
+    if barkod:
+        return (
+            barkod,
+            "GORUNEN_BARKOD"
+        )
+
     barkod = duz_metin(
         veri.get("gtin13")
         or veri.get("gtin14")
         or veri.get("gtin12")
         or veri.get("gtin8")
         or veri.get("gtin")
-        or veri.get("mpn")
     )
 
     if barkod:
-        return barkod, "JSON-LD"
-
-    barkod = etiket_degeri_bul(
-        html,
-        [
-            "Barkod Kodu",
-            "Barkod",
-            "EAN",
-            "GTIN"
-        ]
-    )
-
-    if barkod:
-        return barkod, "URUN DETAYI"
-
-    barkod = metin_bul(
-        html,
-        [
-            '[itemprop="gtin13"]',
-            '[itemprop="gtin14"]',
-            '[itemprop="gtin"]'
-        ]
-    )
-
-    if barkod:
-        return barkod, "HTML"
+        return (
+            barkod,
+            "JSON-LD"
+        )
 
     return "", "BULUNAMADI"
 
 
-def fiyat_bul(html, veri):
-    teklif = teklif_bul(veri)
+def fiyat_sayiya_cevir(deger):
+    if deger is None:
+        return None
 
-    fiyat = duz_metin(
-        teklif.get("price")
+    deger = temiz_metin(deger)
+
+    if not deger:
+        return None
+
+    temiz = re.sub(
+        r"[^\d,.\-]",
+        "",
+        deger
+    )
+
+    if not temiz:
+        return None
+
+    try:
+        if "," in temiz and "." in temiz:
+            # Turk formati:
+            # 12.203,33
+            if temiz.rfind(",") > temiz.rfind("."):
+                temiz = temiz.replace(".", "")
+                temiz = temiz.replace(",", ".")
+
+        elif "," in temiz:
+            temiz = temiz.replace(",", ".")
+
+        return float(temiz)
+
+    except ValueError:
+        return None
+
+
+def fiyat_bul(html, veri):
+    teklifler = teklif_bul(veri)
+
+    satis_fiyati = duz_metin(
+        teklifler.get("price")
     )
 
     fiyat_kaynagi = (
         "JSON-LD"
-        if fiyat
+        if satis_fiyati
         else ""
     )
 
-    if not fiyat:
-        fiyat = metin_bul(
+    if not satis_fiyati:
+        satis_fiyati = metin_bul(
             html,
             [
                 'meta[itemprop="price"]',
                 '[itemprop="price"]',
-                ".product-price",
                 ".current-price",
-                ".discounted-price"
+                ".product-price"
             ]
         )
 
-        if fiyat:
+        if satis_fiyati:
             fiyat_kaynagi = "HTML"
 
     para_birimi = duz_metin(
-        teklif.get("priceCurrency")
+        teklifler.get(
+            "priceCurrency"
+        )
     )
 
-    if not para_birimi:
-        para_birimi = metin_bul(
-            html,
-            [
-                'meta[itemprop="priceCurrency"]',
-                '[itemprop="priceCurrency"]'
-            ]
-        )
+    # Sitenin gorunen "Fiyat" alani:
+    # 12.203,33 TL + KDV
+    kdv_haric_ham = etiket_sonrasi(
+        html,
+        "Fiyat"
+    )
+
+    kdv_haric_sayi = fiyat_sayiya_cevir(
+        kdv_haric_ham
+    )
+
+    satis_sayi = fiyat_sayiya_cevir(
+        satis_fiyati
+    )
+
+    kdv_orani = ""
+    kdv_durumu = "DOGRULANMADI"
+
+    if (
+        satis_sayi is not None
+        and kdv_haric_sayi is not None
+        and kdv_haric_sayi > 0
+    ):
+        oran = (
+            satis_sayi
+            / kdv_haric_sayi
+            - 1
+        ) * 100
+
+        if 19 <= oran <= 21:
+            kdv_orani = "20"
+            kdv_durumu = (
+                "SATIS_FIYATI_KDV_DAHIL"
+            )
+
+        elif 9 <= oran <= 11:
+            kdv_orani = "10"
+            kdv_durumu = (
+                "SATIS_FIYATI_KDV_DAHIL"
+            )
+
+        elif -1 <= oran <= 1:
+            kdv_orani = "0"
+            kdv_durumu = (
+                "FIYATLAR_ESIT"
+            )
 
     if not para_birimi:
-        fiyat_metni = temiz_metin(
-            fiyat
+        birlesik = (
+            str(satis_fiyati)
+            + " "
+            + str(kdv_haric_ham)
         )
 
         if re.search(
             r"\bTRY\b|₺|\bTL\b",
-            fiyat_metni,
+            birlesik,
             re.I
         ):
             para_birimi = "TRY"
 
         elif re.search(
             r"\bUSD\b|\$",
-            fiyat_metni,
+            birlesik,
             re.I
         ):
             para_birimi = "USD"
 
         elif re.search(
             r"\bEUR\b|€",
-            fiyat_metni,
+            birlesik,
             re.I
         ):
             para_birimi = "EUR"
 
-    kdv_haric = etiket_degeri_bul(
-        html,
-        [
-            "KDV Hariç",
-            "KDV Haric",
-            "KDV Hariç Fiyat",
-            "KDV Haric Fiyat"
-        ]
-    )
-
     return (
-        fiyat,
+        satis_fiyati,
         para_birimi,
         fiyat_kaynagi,
-        kdv_haric
+        kdv_haric_ham,
+        kdv_orani,
+        kdv_durumu
     )
-
-
-def kategori_bul(html):
-    breadcrumb = jsonld_breadcrumb(
-        html
-    )
-
-    kategoriler = []
-
-    if breadcrumb:
-        elemanlar = breadcrumb.get(
-            "itemListElement",
-            []
-        )
-
-        if isinstance(elemanlar, list):
-            for eleman in elemanlar:
-                if not isinstance(
-                    eleman,
-                    dict
-                ):
-                    continue
-
-                isim = duz_metin(
-                    eleman.get("name")
-                    or (
-                        eleman.get(
-                            "item",
-                            {}
-                        ).get("name")
-                        if isinstance(
-                            eleman.get("item"),
-                            dict
-                        )
-                        else ""
-                    )
-                )
-
-                if isim:
-                    kategoriler.append(
-                        isim
-                    )
-
-    if not kategoriler:
-        for link in html.select(
-            ".breadcrumb a, "
-            ".breadcrumbs a, "
-            '[class*="breadcrumb"] a'
-        ):
-            isim = temiz_metin(
-                link.get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-            if isim:
-                kategoriler.append(
-                    isim
-                )
-
-    temiz = []
-
-    for isim in kategoriler:
-        if isim.lower() in {
-            "anasayfa",
-            "ana sayfa",
-            "home"
-        }:
-            continue
-
-        if isim not in temiz:
-            temiz.append(isim)
-
-    if not temiz:
-        return ""
-
-    return " > ".join(temiz)
 
 
 def stok_bul(html):
@@ -602,6 +535,25 @@ def stok_bul(html):
         )
 
     return ""
+
+
+def aciklama_bul(html, veri):
+    aciklama = duz_metin(
+        veri.get("description")
+    )
+
+    if aciklama:
+        return aciklama
+
+    return metin_bul(
+        html,
+        [
+            '[itemprop="description"]',
+            ".product-description",
+            "#product-description",
+            ".product-detail-description"
+        ]
+    )
 
 
 def gorsel_bul(html, veri, adres):
@@ -637,31 +589,12 @@ def gorsel_bul(html, veri, adres):
         )
 
     if gorsel:
-        gorsel = urljoin(
+        return urljoin(
             adres,
             gorsel
         )
 
-    return gorsel
-
-
-def aciklama_bul(html, veri):
-    aciklama = duz_metin(
-        veri.get("description")
-    )
-
-    if aciklama:
-        return aciklama
-
-    return metin_bul(
-        html,
-        [
-            '[itemprop="description"]',
-            ".product-description",
-            "#product-description",
-            ".product-detail-description"
-        ]
-    )
+    return ""
 
 
 def urun_oku(adres):
@@ -724,8 +657,13 @@ def urun_oku(adres):
     marka, marka_kaynagi = (
         marka_bul(
             html,
-            veri,
-            urun_adi
+            veri
+        )
+    )
+
+    kategori, kategori_kaynagi = (
+        kategori_bul(
+            html
         )
     )
 
@@ -744,17 +682,15 @@ def urun_oku(adres):
     )
 
     (
-        fiyat,
+        satis_fiyati,
         para_birimi,
         fiyat_kaynagi,
-        kdv_haric_fiyat
+        kdv_haric_fiyat,
+        kdv_orani,
+        kdv_durumu
     ) = fiyat_bul(
         html,
         veri
-    )
-
-    kategori = kategori_bul(
-        html
     )
 
     stok = stok_bul(
@@ -774,10 +710,16 @@ def urun_oku(adres):
 
     return {
         "url": adres,
+
         "urun_adi": urun_adi,
 
         "marka": marka,
-        "marka_kaynagi": marka_kaynagi,
+        "marka_kaynagi":
+            marka_kaynagi,
+
+        "kategori": kategori,
+        "kategori_kaynagi":
+            kategori_kaynagi,
 
         "stok_kodu": stok_kodu,
         "stok_kodu_kaynagi":
@@ -787,27 +729,29 @@ def urun_oku(adres):
         "barkod_kaynagi":
             barkod_kaynagi,
 
-        "kategori": kategori,
+        "satis_fiyati":
+            satis_fiyati,
 
-        "satis_fiyati": fiyat,
         "para_birimi":
             para_birimi,
+
         "fiyat_kaynagi":
             fiyat_kaynagi,
 
         "kdv_haric_fiyat":
             kdv_haric_fiyat,
 
+        "kdv_orani":
+            kdv_orani,
+
         "kdv_durumu":
-            "DOGRULANMADI",
+            kdv_durumu,
 
         "stok": stok,
 
-        "aciklama":
-            aciklama,
+        "aciklama": aciklama,
 
-        "gorsel":
-            gorsel
+        "gorsel": gorsel
     }
 
 
@@ -827,8 +771,7 @@ def calistir():
 
         adresler = [
             satir["url"].strip()
-            for satir
-            in csv.DictReader(
+            for satir in csv.DictReader(
                 dosya
             )
             if satir.get(
@@ -858,44 +801,40 @@ def calistir():
             flush=True
         )
 
-        try:
-            kayit = urun_oku(
-                adres
-            )
+        kayit = urun_oku(
+            adres
+        )
 
-            sonuclar.append(
-                kayit
-            )
+        sonuclar.append(
+            kayit
+        )
 
-            print(
-                "Ad:",
-                kayit["urun_adi"],
-                "| Marka:",
-                kayit["marka"]
-                or "BOS",
-                "| Kod:",
-                kayit["stok_kodu"]
-                or "BOS",
-                "| Barkod:",
-                kayit["barkod"]
-                or "BOS",
-                "| Fiyat:",
-                kayit["satis_fiyati"]
-                or "BOS",
-                "| Para:",
-                kayit["para_birimi"]
-                or "BOS",
-                "| Stok:",
-                kayit["stok"]
-                or "BOS",
-                flush=True
-            )
-
-        except Exception as hata:
-            raise SystemExit(
-                f"Test durduruldu: "
-                f"{adres} - {hata}"
-            )
+        print(
+            "Ad:",
+            kayit["urun_adi"],
+            "| Marka:",
+            kayit["marka"]
+            or "BOS",
+            "| Kategori:",
+            kayit["kategori"]
+            or "BOS",
+            "| Kod:",
+            kayit["stok_kodu"]
+            or "BOS",
+            "| Barkod:",
+            kayit["barkod"]
+            or "BOS",
+            "| Fiyat:",
+            kayit["satis_fiyati"]
+            or "BOS",
+            "| KDV:",
+            kayit["kdv_orani"]
+            or "?",
+            "| Stok:",
+            kayit["stok"]
+            or "BOS",
+            flush=True
+        )
 
     alanlar = [
         "url",
@@ -904,19 +843,21 @@ def calistir():
         "marka",
         "marka_kaynagi",
 
+        "kategori",
+        "kategori_kaynagi",
+
         "stok_kodu",
         "stok_kodu_kaynagi",
 
         "barkod",
         "barkod_kaynagi",
 
-        "kategori",
-
         "satis_fiyati",
         "para_birimi",
         "fiyat_kaynagi",
 
         "kdv_haric_fiyat",
+        "kdv_orani",
         "kdv_durumu",
 
         "stok",
@@ -936,13 +877,13 @@ def calistir():
         )
 
         yazici.writeheader()
+
         yazici.writerows(
             sonuclar
         )
 
     print(
-        "\nTEST TAMAMLANDI",
-        flush=True
+        "\nTEST TAMAMLANDI"
     )
 
     print(
@@ -954,6 +895,14 @@ def calistir():
         "Markasi bulunan:",
         sum(
             bool(x["marka"])
+            for x in sonuclar
+        )
+    )
+
+    print(
+        "Kategorisi bulunan:",
+        sum(
+            bool(x["kategori"])
             for x in sonuclar
         )
     )
@@ -975,17 +924,17 @@ def calistir():
     )
 
     print(
-        "Kategorisi bulunan:",
+        "Fiyati bulunan:",
         sum(
-            bool(x["kategori"])
+            bool(x["satis_fiyati"])
             for x in sonuclar
         )
     )
 
     print(
-        "Fiyati bulunan:",
+        "KDV orani bulunan:",
         sum(
-            bool(x["satis_fiyati"])
+            bool(x["kdv_orani"])
             for x in sonuclar
         )
     )
