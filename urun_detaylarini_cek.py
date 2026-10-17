@@ -155,7 +155,7 @@ def urun_oku(adres):
         ])
     )
     # Urun adindan yalnizca kesin taninan marka on ekini kullan.
-    if not marka and re.match(r"^AEG(?:\\s|$)", ad, re.I):
+    if not marka and re.match(r"^AEG(?:\s|$)", ad, re.I):
         marka = "AEG"
 
     teklifler = veri.get("offers", {})
