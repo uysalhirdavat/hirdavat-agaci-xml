@@ -99,6 +99,21 @@ def jsonld_urun(html):
     return {}
 
 
+def sayfa_urun_bilgisi(html):
+    # Yalnizca bu sayfanin pageParams.product nesnesini tara.
+    for script in html.select("script"):
+        kaynak = script.string or script.get_text()
+        eslesme = re.search(r"\\bpageParams\\s*=\\s*\\{\\s*product\\s*:\\s*\\{([^{}]*)\\}", kaynak)
+        if not eslesme:
+            continue
+        alan = eslesme.group(1)
+        def deger(anahtar):
+            bulunan = re.search(r"(?<![\\w])" + re.escape(anahtar) + r"\\s*:\\s*(?:\\\"([^\\\"]*)\\\"|'([^']*)'|(-?\\d+(?:\\.\\d+)?))", alan)
+            return next((x for x in bulunan.groups() if x is not None), "") if bulunan else ""
+        return {x: deger(x) for x in ("sku", "brandName", "categoryName", "tax")}
+    return {}
+
+
 def urun_oku(adres):
     parca = urlparse(adres)
 
@@ -118,6 +133,7 @@ def urun_oku(adres):
 
     html = BeautifulSoup(cevap.text, "html.parser")
     veri = jsonld_urun(html)
+    sayfa = sayfa_urun_bilgisi(html)
 
     ad = (
         duz_metin(veri.get("name"))
@@ -155,6 +171,7 @@ def urun_oku(adres):
             'meta[property="product:brand"]'
         ])
     )
+    marka = sayfa.get("brandName") or marka
     # Urun adindan yalnizca kesin taninan marka on ekini kullan.
     if not marka and re.match(r"^AEG(?:\s|$)", ad, re.I):
         marka = "AEG"
@@ -235,6 +252,7 @@ def urun_oku(adres):
             '.product-list-row .product-list-content a[href*="/kategori/"]',
             'ol[typeof="BreadcrumbList"] a[href*="/kategori/"]'
         ])
+    kategori = sayfa.get("categoryName") or kategori
     if not kategori:
         print(f"UYARI: Kategori bulunamadi: {adres}", flush=True)
 
@@ -254,8 +272,11 @@ def urun_oku(adres):
     if gorsel:
         gorsel = urljoin(adres, gorsel)
 
-    # KDV kaynaktan dogrulanamiyorsa bos birak.
-    kdv = ""
+    # Yalnizca ana urunun pageParams.product.tax degeri kullanilir.
+    kdv = sayfa.get("tax", "")
+    if kdv and kdv not in ("0", "1", "10", "20"):
+        print(f"UYARI: Beklenmeyen KDV: {kdv} - {adres}", flush=True)
+        kdv = ""
 
     if not ad:
         raise ValueError("Urun adi okunamadi")
@@ -326,6 +347,7 @@ def calistir():
             "| Barkod:", kayit["barkod"],
             "| Fiyat:", kayit["fiyat"],
             "| Stok:", kayit["stok"],
+            "| KDV:", kayit["kdv"],
             flush=True
         )
 
@@ -347,7 +369,7 @@ def calistir():
     print("\nTEST TAMAMLANDI", flush=True)
     print("Okunan urun:", len(sonuclar), flush=True)
     print("Dosya:", CIKIS, flush=True)
-    print("KDV: Dogrulanamadi, bos birakildi.", flush=True)
+    print("KDV bulunan:", sum(bool(x["kdv"]) for x in sonuclar), "/", len(sonuclar), flush=True)
 
 
 if __name__ == "__main__":
