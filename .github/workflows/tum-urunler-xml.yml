@@ -1,0 +1,36 @@
+name: Tum Urunleri XML Olustur
+
+on:
+  workflow_dispatch:
+
+jobs:
+  xml-olustur:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Kodlari indir
+        uses: actions/checkout@v4
+      - name: Python kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Kutuphaneleri yukle
+        run: pip install -r requirements.txt
+      - name: Tum urun baglantilarini bul
+        run: python urunleri_cek.py
+      - name: Tum urunleri cek ve XML olustur
+        run: python tum_urunleri_xml_yap.py
+      - name: XML CSV ve kontrol raporunu indirilebilir kaydet
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hirdavat-agaci-tum-urunler-xml
+          path: |
+            tum_urunler.xml
+            tum_urunler.csv
+            urun_hatalari.csv
+            xml_kontrol_raporu.txt
+            urun_baglantilari.csv
+            kategori_raporu.csv
+          if-no-files-found: warn
+          retention-days: 7
